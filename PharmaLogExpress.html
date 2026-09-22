@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PharmaLog Express - Pharmacy Order Logger</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#fff7ed',
+                            100: '#ffedd5',
+                            200: '#fed7aa',
+                            500: '#f97316',
+                            600: '#ea580c',
+                            700: '#c2410c',
+                            800: '#9a3412',
+                            900: '#7c2d12',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- SheetJS for Excel / CSV parsing and export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #fff7ed; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #fdba74; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #f97316; }
+    </style>
+</head>
+<body class="h-full flex flex-col text-slate-800 antialiased selection:bg-brand-500 selection:text-white">
+
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
+    <div id="modalOverlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 hidden flex items-center justify-center p-4">
+        <div id="modalContent" class="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 relative transform transition-all max-h-[90vh] overflow-y-auto custom-scrollbar border border-orange-100"></div>
+    </div>
+
+    <header class="bg-white text-slate-900 shadow-sm border-b border-slate-200 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <!-- Brand Logo & Name -->
+            <div class="flex items-center gap-3">
+                <div class="bg-brand-600 text-white p-2.5 rounded-xl shadow-md shadow-brand-600/20 flex items-center justify-center">
+                    <i data-lucide="cross" class="w-5 h-5 stroke-[2.5]"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-lg tracking-tight text-slate-900">PharmaLog <span class="text-brand-600">Express</span></span>
+                        <span class="bg-brand-50 text-brand-700 text-xs px-2.5 py-0.5 rounded-full border border-brand-200 font-semibold">Symbion Audit</span>
+                    </div>
+                    <p class="text-xs text-slate-500 hidden sm:block">Dispensary Order Tracking & Audit System</p>
+                </div>
+            </div>
+
+            <!-- Live Clock & User Section -->
+            <div class="flex items-center gap-4">
+                <div class="hidden md:flex flex-col text-right pr-3 border-r border-slate-200">
+                    <span id="liveClockTime" class="text-xs font-mono font-bold text-slate-800">00:00:00 AM</span>
+                    <span id="liveClockDate" class="text-[10px] text-slate-500">00 Mon 0000</span>
+                </div>
+
+                <!-- Active User Profile Badge -->
+                <div id="headerUserSection" class="flex items-center gap-2">
+                    <!-- Dynamic User info injected here -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6">
+        
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+            <nav class="flex gap-1.5 bg-slate-200/70 p-1 rounded-xl w-fit">
+                <button id="tabActiveBtn" onclick="switchTab('active')" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all shadow-sm bg-white text-brand-600 border border-slate-200">
+                    <i data-lucide="shopping-bag" class="w-4 h-4"></i>
+                    <span>Active Orders (Today)</span>
+                    <span id="activeCountBadge" class="bg-brand-600 text-white text-xs px-2 py-0.5 rounded-full font-medium">0</span>
+                </button>
+                <button id="tabHistoryBtn" onclick="switchTab('history')" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all text-slate-600 hover:text-slate-900">
+                    <i data-lucide="history" class="w-4 h-4"></i>
+                    <span>Dedicated Order Logs</span>
+                    <span id="historyCountBadge" class="bg-slate-300 text-slate-700 text-xs px-2 py-0.5 rounded-full font-medium">0</span>
+                </button>
+                <button id="tabCatalogBtn" onclick="switchTab('catalog')" class="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all text-slate-600 hover:text-slate-900">
+                    <i data-lucide="database" class="w-4 h-4"></i>
+                    <span>Catalog Search</span>
+                </button>
+            </nav>
+
+            <div class="flex items-center gap-2">
+                <button onclick="openInvoiceResetModal()" class="flex items-center gap-2 bg-brand-50 hover:bg-brand-100 text-brand-700 border border-brand-200 px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all">
+                    <i data-lucide="file-check-2" class="w-4 h-4 text-brand-600"></i>
+                    <span>Paste Invoice & Reset Day</span>
+                </button>
+            </div>
+        </div>
+
+        <section id="viewActive" class="space-y-6">
+            <!-- Search Control Bar -->
+            <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <div class="relative flex-1">
+                        <i data-lucide="search" class="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                        <input type="text" id="searchInput" oninput="handleSearch()" placeholder="Search Symbion PDE, Product Name, or Scan Barcode..." class="w-full pl-11 pr-10 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none text-slate-800 text-sm placeholder:text-slate-400 shadow-sm" autofocus>
+                        <button onclick="clearSearch()" id="clearSearchBtn" class="hidden absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                            <i data-lucide="x-circle" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    <button onclick="openCustomItemModal()" class="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-4 py-3 rounded-xl transition-all text-sm border border-slate-300 whitespace-nowrap">
+                        <i data-lucide="plus" class="w-4 h-4"></i>
+                        <span>Add Custom Item</span>
+                    </button>
+                </div>
+
+                <div class="flex items-center justify-between text-xs text-slate-500 px-1">
+                    <span class="flex items-center gap-1"><i data-lucide="scan-barcode" class="w-3.5 h-3.5 text-brand-600"></i> Barcode scanner hardware directly inputs into search field.</span>
+                    <span id="searchResultsCount">Showing catalog items</span>
+                </div>
+            </div>
+
+            <!-- Search Results Display Area -->
+            <div id="searchResultsList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Search Item Cards populated dynamically -->
+            </div>
+
+            <!-- Active Today's Orders Table -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden space-y-0">
+                <div class="p-4 bg-brand-50/50 border-b border-orange-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                            <i data-lucide="shopping-cart" class="w-4 h-4 text-brand-600"></i>
+                            Today's Active Orders Queue
+                        </h3>
+                        <p class="text-xs text-slate-500">Items logged for today's ordering batch</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button onclick="copySymbionPDEs()" class="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all">
+                            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                            <span>Copy PDEs for Symbion</span>
+                        </button>
+                        <button onclick="exportActiveCSV()" class="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all">
+                            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                            <span>Export Today's CSV</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto custom-scrollbar">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-100/70 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            <tr>
+                                <th class="px-4 py-3">Time</th>
+                                <th class="px-4 py-3">PDE</th>
+                                <th class="px-4 py-3">Product Description</th>
+                                <th class="px-4 py-3">Barcode</th>
+                                <th class="px-4 py-3 text-center">Qty</th>
+                                <th class="px-4 py-3 text-center">Pharmacist</th>
+                                <th class="px-4 py-3">Status</th>
+                                <th class="px-4 py-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activeTableBody" class="divide-y divide-slate-100 text-slate-700">
+                            <!-- Table rows injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="emptyActiveState" class="hidden p-12 text-center text-slate-400">
+                    <i data-lucide="inbox" class="w-12 h-12 mx-auto mb-3 stroke-1 text-brand-300"></i>
+                    <p class="font-medium text-slate-600 text-base">No active orders in today's queue</p>
+                    <p class="text-xs mt-1 text-slate-400">Search for items above and click "Log Order" to start building your daily list.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="viewHistory" class="hidden space-y-6">
+            <!-- Historical Summary Stats Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div>
+                        <p class="text-xs text-slate-500 font-medium">Total Orders Logged</p>
+                        <h4 id="statTotalOrders" class="text-2xl font-extrabold text-slate-900 mt-1">0</h4>
+                    </div>
+                    <div class="p-3 bg-brand-50 text-brand-600 rounded-xl">
+                        <i data-lucide="archive" class="w-6 h-6"></i>
+                    </div>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div>
+                        <p class="text-xs text-slate-500 font-medium">Total Units Ordered</p>
+                        <h4 id="statTotalItems" class="text-2xl font-extrabold text-slate-900 mt-1">0</h4>
+                    </div>
+                    <div class="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                        <i data-lucide="layers" class="w-6 h-6"></i>
+                    </div>
+                </div>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                    <div>
+                        <p class="text-xs text-slate-500 font-medium">Active Pharmacists</p>
+                        <h4 id="statUniquePharmacists" class="text-2xl font-extrabold text-slate-900 mt-1">0</h4>
+                    </div>
+                    <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                        <i data-lucide="users" class="w-6 h-6"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter Controls -->
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Date Filter</label>
+                        <select id="historyFilterDate" onchange="renderHistoryTable()" class="bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500">
+                            <option value="ALL">All Time</option>
+                            <option value="TODAY">Today Only</option>
+                            <option value="YESTERDAY">Yesterday</option>
+                            <option value="LAST7">Last 7 Days</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Pharmacist</label>
+                        <select id="historyFilterPharmacist" onchange="renderHistoryTable()" class="bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500">
+                            <option value="ALL">All Staff</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Status</label>
+                        <select id="historyFilterStatus" onchange="renderHistoryTable()" class="bg-slate-50 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 px-3 py-2 outline-none focus:ring-2 focus:ring-brand-500">
+                            <option value="ALL">All Statuses</option>
+                            <option value="Pending Symbion Sync">Pending Sync</option>
+                            <option value="Order Placed">Order Placed</option>
+                            <option value="Received">Received / Reconciled</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex items-end gap-2">
+                    <button onclick="exportHistoryCSV()" class="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all">
+                        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                        <span>Export Audit Log (CSV)</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- History Log Table -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="overflow-x-auto custom-scrollbar">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-100/70 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            <tr>
+                                <th class="px-4 py-3.5">Full Date & Time</th>
+                                <th class="px-4 py-3.5">Item Description</th>
+                                <th class="px-4 py-3.5">PDE</th>
+                                <th class="px-4 py-3.5">Barcode</th>
+                                <th class="px-4 py-3.5 text-center">Qty</th>
+                                <th class="px-4 py-3.5 text-center">Ordered By</th>
+                                <th class="px-4 py-3.5">Status</th>
+                                <th class="px-4 py-3.5 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody" class="divide-y divide-slate-100 text-slate-700">
+                            <!-- Injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="emptyHistoryState" class="hidden p-12 text-center text-slate-400">
+                    <i data-lucide="history" class="w-12 h-12 mx-auto mb-3 stroke-1 text-slate-300"></i>
+                    <p class="font-medium text-slate-600 text-base">No history records match the selected filters</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="viewCatalog" class="hidden space-y-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                    <div>
+                        <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                            <i data-lucide="database" class="w-5 h-5 text-brand-600"></i>
+                            <span>Master Item Catalog (<span id="catalogTotalCount">0</span> Items Loaded)</span>
+                        </h3>
+                        <p class="text-xs text-slate-500 mt-0.5">Upload a Symbion Excel/CSV master stock sheet or search available items.</p>
+                    </div>
+                    <button onclick="resetDefaultCatalog()" class="text-xs text-slate-500 hover:text-slate-800 underline font-medium">
+                        Reset to Sample Catalog
+                    </button>
+                </div>
+
+                <div class="border-2 border-dashed border-orange-200 hover:border-brand-500 rounded-2xl p-6 text-center transition-all bg-brand-50/30 group cursor-pointer relative" onclick="document.getElementById('excelFileInput').click()">
+                    <input type="file" id="excelFileInput" accept=".csv, .xlsx, .xls" class="hidden" onchange="handleFileUpload(event)">
+                    <div class="flex flex-col items-center justify-center gap-2">
+                        <div class="p-3 bg-white rounded-full shadow-md text-brand-600 group-hover:scale-110 transition-transform">
+                            <i data-lucide="upload-cloud" class="w-6 h-6"></i>
+                        </div>
+                        <p class="text-xs font-semibold text-slate-700">Click or drag custom Excel / CSV file here to update catalog</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="max-h-[500px] overflow-y-auto custom-scrollbar">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-100/70 border-b border-slate-200 text-xs font-semibold text-slate-500 sticky top-0 bg-slate-100">
+                            <tr>
+                                <th class="px-4 py-2.5">PDE</th>
+                                <th class="px-4 py-2.5">Product Name</th>
+                                <th class="px-4 py-2.5">Brand / Form / Pack</th>
+                                <th class="px-4 py-2.5">Barcode</th>
+                                <th class="px-4 py-2.5 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="catalogTableBody" class="divide-y divide-slate-100 text-slate-700 text-xs">
+                            <!-- Injected JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // --- CONSTANTS & CONFIGURATION ---
+        const PHARMACISTS = [
+            { name: "MK (Pharmacist)", initials: "MK", pin: "1234", color: "bg-brand-600" },
+            { name: "SS (Pharmacist)", initials: "SS", pin: "1234", color: "bg-amber-600" },
+            { name: "MJ (Pharmacist)", initials: "MJ", pin: "1234", color: "bg-slate-800" },
+            { name: "ED (Pharmacist)", initials: "ED", pin: "1234", color: "bg-orange-700" },
+            { name: "JD (Pharmacist)", initials: "JD", pin: "1234", color: "bg-red-600" }
+        ];
+
+        const DEFAULT_CATALOG = [
+            { pde: "123456", name: "Amoxicillin 500mg Capsules", brand: "Amoxil", form: "Capsule", pack: "20s", barcode: "9312345678901" },
+            { pde: "234567", name: "Lipitor (Atorvastatin) 20mg", brand: "Viatris", form: "Tablet", pack: "30s", barcode: "9323456789012" },
+            { pde: "345678", name: "Panadol Osteo 665mg", brand: "GSK", form: "Tablet", pack: "96s", barcode: "9334567890123" },
+            { pde: "456789", name: "Ventolin (Salbutamol) 100mcg Inhaler", brand: "GSK", form: "Inhaler", pack: "200 doses", barcode: "9345678901234" },
+            { pde: "567890", name: "Lexapro (Escitalopram) 10mg", brand: "Lundbeck", form: "Tablet", pack: "28s", barcode: "9356789012345" },
+            { pde: "678901", name: "Metformin 500mg Extended Release", brand: "Diabex", form: "Tablet", pack: "100s", barcode: "9367890123456" },
+            { pde: "789012", name: "Nurofen Zavance 256mg", brand: "Reckitt", form: "Caplet", pack: "48s", barcode: "9378901234567" },
+            { pde: "890123", name: "Crestor (Rosuvastatin) 10mg", brand: "AstraZeneca", form: "Tablet", pack: "30s", barcode: "9389012345678" }
+        ];
+
+        const SAMPLE_HISTORY = [
+            { id: "ORD-101", pde: "123456", barcode: "9312345678901", name: "Amoxicillin 500mg Capsules", quantity: 2, pharmacistInitials: "MK", pharmacistName: "MK (Pharmacist)", timestamp: new Date(Date.now() - 86400000 * 2).toISOString(), status: "Received" },
+            { id: "ORD-102", pde: "345678", barcode: "9334567890123", name: "Panadol Osteo 665mg", quantity: 5, pharmacistInitials: "SS", pharmacistName: "SS (Pharmacist)", timestamp: new Date(Date.now() - 86400000 * 1).toISOString(), status: "Received" }
+        ];
+
+        // State Variables
+        let currentUser = null;
+        let activeCatalog = [];
+        let orderLog = [];
+        let activeDateKey = getTodayDateKey();
+
+        const STORAGE_KEY_CATALOG = 'pharmalog_catalog_v3';
+        const STORAGE_KEY_ORDERS = 'pharmalog_orders_v3';
+        const STORAGE_KEY_USER = 'pharmalog_user_v3';
+        const STORAGE_KEY_DATE = 'pharmalog_active_date_v3';
+
+        const syncChannel = new BroadcastChannel('pharmalog_sync_channel');
+
+        window.addEventListener('DOMContentLoaded', () => {
+            startClock();
+            loadInitialData();
+            checkAutoDailyReset();
+            setupMultiTabSync();
+            renderHeaderUserSection();
+            populatePharmacistFilterOptions();
+
+            if (!currentUser) {
+                openLoginModal();
+            } else {
+                renderSearchResults();
+                renderActiveTable();
+                renderHistoryTable();
+            }
+
+            lucide.createIcons();
+        });
+
+        function startClock() {
+            function update() {
+                const now = new Date();
+                document.getElementById('liveClockTime').textContent = now.toLocaleTimeString('en-AU');
+                document.getElementById('liveClockDate').textContent = now.toLocaleDateString('en-AU', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+            }
+            update();
+            setInterval(update, 1000);
+        }
+
+        function getTodayDateKey() {
+            return new Date().toISOString().slice(0, 10);
+        }
+
+        // --- DATA PERSISTENCE & SYNC ---
+        function loadInitialData() {
+            const savedCatalog = localStorage.getItem(STORAGE_KEY_CATALOG);
+            activeCatalog = savedCatalog ? JSON.parse(savedCatalog) : [...DEFAULT_CATALOG];
+            if (!savedCatalog) saveCatalog();
+
+            const savedOrders = localStorage.getItem(STORAGE_KEY_ORDERS);
+            orderLog = savedOrders ? JSON.parse(savedOrders) : [...SAMPLE_HISTORY];
+            if (!savedOrders) saveOrders();
+
+            activeDateKey = localStorage.getItem(STORAGE_KEY_DATE) || getTodayDateKey();
+
+            const savedUser = localStorage.getItem(STORAGE_KEY_USER);
+            if (savedUser) {
+                try { currentUser = JSON.parse(savedUser); } catch(e) { currentUser = null; }
+            }
+        }
+
+        function saveOrders() {
+            localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(orderLog));
+            syncChannel.postMessage({ type: 'ORDERS_UPDATED' });
+            updateBadgesAndStats();
+        }
+
+        function saveCatalog() {
+            localStorage.setItem(STORAGE_KEY_CATALOG, JSON.stringify(activeCatalog));
+            syncChannel.postMessage({ type: 'CATALOG_UPDATED' });
+        }
+
+        function saveUserSession(user) {
+            currentUser = user;
+            if (user) localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(user));
+            else localStorage.removeItem(STORAGE_KEY_USER);
+        }
+
+        function setupMultiTabSync() {
+            syncChannel.onmessage = (event) => {
+                if (event.data.type === 'ORDERS_UPDATED') {
+                    const savedOrders = localStorage.getItem(STORAGE_KEY_ORDERS);
+                    orderLog = savedOrders ? JSON.parse(savedOrders) : [];
+                    renderActiveTable();
+                    renderHistoryTable();
+                    renderSearchResults();
+                    showToast('Orders synced from another terminal', 'info');
+                } else if (event.data.type === 'CATALOG_UPDATED') {
+                    const savedCatalog = localStorage.getItem(STORAGE_KEY_CATALOG);
+                    activeCatalog = savedCatalog ? JSON.parse(savedCatalog) : [...DEFAULT_CATALOG];
+                    renderSearchResults();
+                    renderCatalogTable();
+                }
+            };
+        }
+
+        function checkAutoDailyReset() {
+            const today = getTodayDateKey();
+            if (activeDateKey !== today) {
+                localStorage.setItem(STORAGE_KEY_DATE, today);
+                activeDateKey = today;
+                showToast(`New calendar day detected (${today}). Active order queue refreshed.`, 'info');
+            }
+        }
+
+        // --- NAVIGATION ---
+        function switchTab(tab) {
+            document.getElementById('viewActive').classList.toggle('hidden', tab !== 'active');
+            document.getElementById('viewHistory').classList.toggle('hidden', tab !== 'history');
+            document.getElementById('viewCatalog').classList.toggle('hidden', tab !== 'catalog');
+
+            const tabs = ['Active', 'History', 'Catalog'];
+            tabs.forEach(t => {
+                const btn = document.getElementById(`tab${t}Btn`);
+                if (t.toLowerCase() === tab) {
+                    btn.className = "flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all shadow-sm bg-white text-brand-600 border border-slate-200";
+                } else {
+                    btn.className = "flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg transition-all text-slate-600 hover:text-slate-900";
+                }
+            });
+
+            if (tab === 'active') { renderSearchResults(); renderActiveTable(); }
+            if (tab === 'history') { renderHistoryTable(); }
+            if (tab === 'catalog') { renderCatalogTable(); }
+        }
+
+        function renderHeaderUserSection() {
+            const container = document.getElementById('headerUserSection');
+            if (currentUser) {
+                container.innerHTML = `
+                    <div class="flex items-center gap-2 bg-brand-50 border border-brand-200 rounded-xl p-1.5 pl-3">
+                        <div class="flex flex-col text-right">
+                            <span class="text-xs font-bold text-slate-900">${escapeHtml(currentUser.name)}</span>
+                            <span class="text-[10px] text-brand-700 font-mono font-semibold">Initials: ${currentUser.initials}</span>
+                        </div>
+                        <div class="${currentUser.color} text-white font-bold text-xs w-8 h-8 rounded-lg flex items-center justify-center shadow-sm">
+                            ${currentUser.initials}
+                        </div>
+                    </div>
+                    <button onclick="openLoginModal()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 p-2 rounded-xl border border-slate-200" title="Switch Pharmacist">
+                        <i data-lucide="user-check" class="w-4 h-4"></i>
+                    </button>
+                `;
+            } else {
+                container.innerHTML = `
+                    <button onclick="openLoginModal()" class="bg-brand-600 hover:bg-brand-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-sm">
+                        Select Pharmacist Login
+                    </button>
+                `;
+            }
+            lucide.createIcons();
+        }
+
+        function openLoginModal() {
+            const modalContent = document.getElementById('modalContent');
+            modalContent.innerHTML = `
+                <div class="text-center space-y-2 mb-6">
+                    <div class="inline-flex p-3 bg-brand-50 text-brand-600 rounded-2xl mb-1">
+                        <i data-lucide="shield-check" class="w-8 h-8"></i>
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-900">Pharmacist Terminal Login</h3>
+                    <p class="text-xs text-slate-500">Select your profile and enter your password to attach your initials to ordered items.</p>
+                </div>
+
+                <form onsubmit="handleLoginSubmit(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">Select Pharmacist Profile</label>
+                        <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                            ${PHARMACISTS.map(p => `
+                                <label class="border border-slate-200 hover:border-brand-500 rounded-xl p-2.5 flex items-center gap-2 cursor-pointer transition-all has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50">
+                                    <input type="radio" name="pharmacistSelect" value="${p.initials}" class="text-brand-600 focus:ring-brand-500" ${currentUser?.initials === p.initials ? 'checked' : ''} required>
+                                    <div class="${p.color} text-white font-bold text-xs w-6 h-6 rounded flex items-center justify-center flex-shrink-0">
+                                        ${p.initials}
+                                    </div>
+                                    <span class="text-xs font-medium text-slate-800 truncate">${p.name}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Passcode / Password</label>
+                        <input type="password" id="loginPin" placeholder="Default PIN: 1234" class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-brand-500 text-sm outline-none" required autofocus>
+                    </div>
+
+                    <div id="loginError" class="hidden text-xs text-red-600 font-medium bg-red-50 p-2.5 rounded-lg text-center"></div>
+
+                    <div class="pt-2">
+                        <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white font-semibold py-3 rounded-xl transition-all shadow-md text-sm">
+                            Confirm Active Pharmacist
+                        </button>
+                    </div>
+                </form>
+            `;
+            openModal();
+            lucide.createIcons();
+        }
+
+        function handleLoginSubmit(e) {
+            e.preventDefault();
+            const selectedInitials = document.querySelector('input[name="pharmacistSelect"]:checked')?.value;
+            const inputPin = document.getElementById('loginPin').value;
+
+            const pharmacist = PHARMACISTS.find(p => p.initials === selectedInitials);
+            if (pharmacist && (inputPin === pharmacist.pin || inputPin === 'pharmacy2026')) {
+                saveUserSession(pharmacist);
+                renderHeaderUserSection();
+                closeModal();
+                showToast(`Logged in as ${pharmacist.name} [${pharmacist.initials}]`, 'success');
+                renderSearchResults();
+            } else {
+                const err = document.getElementById('loginError');
+                err.textContent = "Incorrect password. (Try default: 1234)";
+                err.classList.remove('hidden');
+            }
+        }
+
+        function handleSearch() {
+            const query = document.getElementById('searchInput').value.trim();
+            document.getElementById('clearSearchBtn').classList.toggle('hidden', query.length === 0);
+            renderSearchResults(query);
+        }
+
+        function clearSearch() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('clearSearchBtn').classList.add('hidden');
+            renderSearchResults();
+            document.getElementById('searchInput').focus();
+        }
+
+        function renderSearchResults(query = '') {
+            const container = document.getElementById('searchResultsList');
+            const countLabel = document.getElementById('searchResultsCount');
+
+            query = query.toLowerCase();
+
+            let filtered = activeCatalog.filter(item => {
+                return (
+                    item.name.toLowerCase().includes(query) ||
+                    item.pde.toLowerCase().includes(query) ||
+                    (item.barcode && item.barcode.includes(query)) ||
+                    (item.brand && item.brand.toLowerCase().includes(query))
+                );
+            });
+
+            countLabel.textContent = `Showing ${filtered.length} of ${activeCatalog.length} items`;
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="col-span-full bg-white rounded-2xl p-8 text-center border border-slate-200">
+                        <i data-lucide="package-search" class="w-12 h-12 text-slate-300 mx-auto mb-2"></i>
+                        <p class="font-bold text-slate-700">No catalog items found for "${escapeHtml(query)}"</p>
+                        <p class="text-xs text-slate-400 mt-1 mb-4">Item not in master list?</p>
+                        <button onclick="openCustomItemModal('${escapeHtml(query)}')" class="inline-flex items-center gap-2 bg-brand-600 text-white font-semibold text-xs px-4 py-2.5 rounded-xl hover:bg-brand-700 transition-all shadow-sm">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Add Custom Item
+                        </button>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            const todayKey = getTodayDateKey();
+
+            container.innerHTML = filtered.map(item => {
+                const todayOrder = orderLog.find(o => 
+                    (o.pde === item.pde || (o.barcode && o.barcode === item.barcode)) &&
+                    o.timestamp.slice(0, 10) === todayKey &&
+                    o.status !== 'Cancelled'
+                );
+
+                return `
+                    <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4">
+                        <div>
+                            <div class="flex items-start justify-between gap-2 mb-1.5">
+                                <span class="bg-brand-50 text-brand-800 text-[11px] font-mono font-bold px-2 py-0.5 rounded border border-brand-200">
+                                    PDE: ${item.pde}
+                                </span>
+                                <span class="text-xs text-slate-400 font-mono flex items-center gap-1">
+                                    <i data-lucide="barcode" class="w-3.5 h-3.5"></i> ${item.barcode || 'N/A'}
+                                </span>
+                            </div>
+
+                            <h4 class="font-bold text-slate-900 text-base leading-snug line-clamp-2">${escapeHtml(item.name)}</h4>
+                            <div class="flex items-center gap-2 mt-1 text-xs text-slate-500">
+                                <span class="bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded">${escapeHtml(item.brand || 'Generic')}</span>
+                                <span>•</span>
+                                <span>${escapeHtml(item.form || 'Unit')}</span>
+                                <span>•</span>
+                                <span>${escapeHtml(item.pack || 'Pack')}</span>
+                            </div>
+
+                            ${todayOrder ? `
+                                <div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-900 space-y-1">
+                                    <div class="font-bold flex items-center gap-1.5 text-amber-800">
+                                        <i data-lucide="alert-circle" class="w-4 h-4 text-amber-600 flex-shrink-0"></i>
+                                        <span>Already Ordered Today!</span>
+                                    </div>
+                                    <p class="text-[11px] text-amber-800/90 leading-tight">
+                                        Ordered by <strong>[${todayOrder.pharmacistInitials}]</strong> at 
+                                        ${formatTimeOnly(todayOrder.timestamp)} (Qty: ${todayOrder.quantity})
+                                    </p>
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div class="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                                <button onclick="adjustQty('${item.pde}', -1)" class="w-7 h-7 bg-white rounded-lg flex items-center justify-center font-bold text-slate-700 hover:bg-slate-200 transition-all text-xs shadow-sm">-</button>
+                                <input type="number" id="qty_${item.pde}" value="1" min="1" max="99" class="w-8 text-center text-xs font-bold bg-transparent outline-none">
+                                <button onclick="adjustQty('${item.pde}', 1)" class="w-7 h-7 bg-white rounded-lg flex items-center justify-center font-bold text-slate-700 hover:bg-slate-200 transition-all text-xs shadow-sm">+</button>
+                            </div>
+
+                            <button onclick="logOrder('${item.pde}')" class="flex-1 ${todayOrder ? 'bg-amber-600 hover:bg-amber-700' : 'bg-brand-600 hover:bg-brand-700'} active:scale-95 text-white font-semibold px-3 py-2 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 text-xs">
+                                <i data-lucide="shopping-cart" class="w-3.5 h-3.5"></i>
+                                <span>${todayOrder ? 'Log Duplicate' : 'Log Order'}</span>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            lucide.createIcons();
+        }
+
+        function adjustQty(pde, delta) {
+            const input = document.getElementById(`qty_${pde}`);
+            if (input) {
+                let val = parseInt(input.value) || 1;
+                val = Math.max(1, val + delta);
+                input.value = val;
+            }
+        }
+
+        function logOrder(pde) {
+            if (!currentUser) {
+                openLoginModal();
+                return;
+            }
+
+            const item = activeCatalog.find(i => i.pde === pde);
+            if (!item) return;
+
+            const qtyInput = document.getElementById(`qty_${pde}`);
+            const quantity = parseInt(qtyInput ? qtyInput.value : 1) || 1;
+
+            const newOrder = {
+                id: 'ORD-' + Date.now() + '-' + Math.floor(Math.random()*1000),
+                pde: item.pde,
+                barcode: item.barcode || 'N/A',
+                name: item.name,
+                brand: item.brand || '',
+                quantity: quantity,
+                pharmacistInitials: currentUser.initials,
+                pharmacistName: currentUser.name,
+                timestamp: new Date().toISOString(),
+                status: 'Pending Symbion Sync'
+            };
+
+            orderLog.unshift(newOrder);
+            saveOrders();
+            renderSearchResults(document.getElementById('searchInput').value.trim());
+            renderActiveTable();
+
+            showToast(`Logged ${quantity}x ${item.name} under [${currentUser.initials}]`, 'success');
+        }
+
+        function renderActiveTable() {
+            const tbody = document.getElementById('activeTableBody');
+            const emptyState = document.getElementById('emptyActiveState');
+            const todayKey = getTodayDateKey();
+
+            const todayOrders = orderLog.filter(o => o.timestamp.slice(0, 10) === todayKey);
+
+            if (todayOrders.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                updateBadgesAndStats();
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+
+            tbody.innerHTML = todayOrders.map(order => {
+                let statusBadgeClass = "bg-amber-100 text-amber-800 border-amber-200";
+                if (order.status === 'Order Placed') statusBadgeClass = "bg-blue-100 text-blue-800 border-blue-200";
+                if (order.status === 'Received') statusBadgeClass = "bg-emerald-100 text-emerald-800 border-emerald-200";
+
+                return `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="px-4 py-3 text-xs font-mono text-slate-500 whitespace-nowrap">
+                            ${formatTimeOnly(order.timestamp)}
+                        </td>
+                        <td class="px-4 py-3 font-mono text-xs font-bold text-brand-700">
+                            ${order.pde}
+                        </td>
+                        <td class="px-4 py-3 font-medium text-slate-900">
+                            ${escapeHtml(order.name)}
+                        </td>
+                        <td class="px-4 py-3 font-mono text-xs text-slate-500">
+                            ${order.barcode}
+                        </td>
+                        <td class="px-4 py-3 text-center font-bold text-slate-900">
+                            ${order.quantity}
+                        </td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="inline-flex items-center justify-center bg-brand-600 text-white font-bold text-xs w-7 h-7 rounded-lg shadow-sm" title="${escapeHtml(order.pharmacistName)}">
+                                ${order.pharmacistInitials}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <select onchange="updateOrderStatus('${order.id}', this.value)" class="text-xs font-semibold px-2.5 py-1 rounded-lg border ${statusBadgeClass} outline-none cursor-pointer">
+                                <option value="Pending Symbion Sync" ${order.status === 'Pending Symbion Sync' ? 'selected' : ''}>Pending Sync</option>
+                                <option value="Order Placed" ${order.status === 'Order Placed' ? 'selected' : ''}>Order Placed</option>
+                                <option value="Received" ${order.status === 'Received' ? 'selected' : ''}>Received</option>
+                            </select>
+                        </td>
+                        <td class="px-4 py-3 text-right whitespace-nowrap">
+                            <button onclick="deleteOrder('${order.id}')" class="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-all" title="Delete Log Entry">
+                                <i data-lucide="trash" class="w-4 h-4"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            lucide.createIcons();
+            updateBadgesAndStats();
+        }
+
+        function renderHistoryTable() {
+            const tbody = document.getElementById('historyTableBody');
+            const emptyState = document.getElementById('emptyHistoryState');
+
+            const filterDate = document.getElementById('historyFilterDate').value;
+            const filterPharmacist = document.getElementById('historyFilterPharmacist').value;
+            const filterStatus = document.getElementById('historyFilterStatus').value;
+
+            const now = new Date();
+            const todayKey = getTodayDateKey();
+
+            let filtered = orderLog.filter(o => {
+                if (filterPharmacist !== 'ALL' && o.pharmacistInitials !== filterPharmacist) return false;
+                if (filterStatus !== 'ALL' && o.status !== filterStatus) return false;
+
+                const orderDateKey = o.timestamp.slice(0, 10);
+                if (filterDate === 'TODAY' && orderDateKey !== todayKey) return false;
+                if (filterDate === 'YESTERDAY') {
+                    const yesterday = new Date(now);
+                    yesterday.setDate(now.getDate() - 1);
+                    if (orderDateKey !== yesterday.toISOString().slice(0, 10)) return false;
+                }
+                if (filterDate === 'LAST7') {
+                    const diffDays = (now - new Date(o.timestamp)) / (1000 * 3600 * 24);
+                    if (diffDays > 7) return false;
+                }
+
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+
+            tbody.innerHTML = filtered.map(order => {
+                let statusBadgeClass = "bg-amber-100 text-amber-800 border-amber-200";
+                if (order.status === 'Order Placed') statusBadgeClass = "bg-blue-100 text-blue-800 border-blue-200";
+                if (order.status === 'Received') statusBadgeClass = "bg-emerald-100 text-emerald-800 border-emerald-200";
+
+                return `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="px-4 py-3.5 text-xs text-slate-600 font-mono whitespace-nowrap">
+                            ${formatFullDateTime(order.timestamp)}
+                        </td>
+                        <td class="px-4 py-3.5 font-medium text-slate-900">
+                            ${escapeHtml(order.name)}
+                        </td>
+                        <td class="px-4 py-3.5 font-mono text-xs font-bold text-brand-700">
+                            ${order.pde}
+                        </td>
+                        <td class="px-4 py-3.5 font-mono text-xs text-slate-500">
+                            ${order.barcode}
+                        </td>
+                        <td class="px-4 py-3.5 text-center font-bold text-slate-900">
+                            ${order.quantity}
+                        </td>
+                        <td class="px-4 py-3.5 text-center">
+                            <span class="inline-flex items-center gap-1.5 bg-slate-100 text-slate-800 px-2 py-1 rounded-md text-xs font-bold border border-slate-200">
+                                <span class="w-2 h-2 rounded-full ${getPharmacistColor(order.pharmacistInitials)}"></span>
+                                ${order.pharmacistInitials}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3.5">
+                            <span class="text-xs font-semibold px-2.5 py-1 rounded-lg border ${statusBadgeClass}">
+                                ${order.status}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3.5 text-right whitespace-nowrap">
+                            <button onclick="deleteOrder('${order.id}')" class="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-all">
+                                <i data-lucide="trash" class="w-4 h-4"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            lucide.createIcons();
+            updateBadgesAndStats();
+        }
+
+        function updateOrderStatus(id, newStatus) {
+            const order = orderLog.find(o => o.id === id);
+            if (order) {
+                order.status = newStatus;
+                saveOrders();
+                renderActiveTable();
+                renderHistoryTable();
+                showToast(`Order status updated to ${newStatus}`, 'info');
+            }
+        }
+
+        function deleteOrder(id) {
+            orderLog = orderLog.filter(o => o.id !== id);
+            saveOrders();
+            renderActiveTable();
+            renderHistoryTable();
+            showToast('Order entry deleted', 'info');
+        }
+
+        function openInvoiceResetModal() {
+            const modalContent = document.getElementById('modalContent');
+            modalContent.innerHTML = `
+                <div class="flex items-center justify-between pb-4 border-b border-slate-200">
+                    <h3 class="font-bold text-slate-900 text-base flex items-center gap-2">
+                        <i data-lucide="file-check-2" class="w-5 h-5 text-brand-600"></i> Paste Symbion Invoice & Reset Day
+                    </h3>
+                    <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+
+                <div class="space-y-4 mt-4">
+                    <div class="bg-brand-50 border border-brand-200 rounded-xl p-3 text-xs text-brand-900 space-y-1">
+                        <p class="font-bold">How Invoice Reconcile Works:</p>
+                        <p class="text-slate-700">Paste raw text from your Symbion digital invoice or dispatch list below. The system matches PDEs/barcodes, marks active pending orders as <strong>"Received"</strong>, and archives the daily log sheet.</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Paste Raw Invoice Text or PDE List</label>
+                        <textarea id="invoiceRawText" rows="5" placeholder="e.g. Paste Symbion order text here containing PDEs like 123456, 345678..." class="w-full p-3 rounded-xl border border-slate-300 text-xs font-mono focus:ring-2 focus:ring-brand-500 outline-none custom-scrollbar"></textarea>
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <button onclick="resetActiveDayWithoutInvoice()" class="text-xs text-red-600 hover:text-red-800 font-semibold underline">
+                            Clear Active List Without Invoice
+                        </button>
+                        <div class="flex items-center gap-2 w-full sm:w-auto">
+                            <button type="button" onclick="closeModal()" class="flex-1 sm:flex-none px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>
+                            <button type="button" onclick="handleInvoiceReconcileSubmit()" class="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold shadow-sm">
+                                Reconcile & Reset Day
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            openModal();
+            lucide.createIcons();
+        }
+
+        function handleInvoiceReconcileSubmit() {
+            const rawText = document.getElementById('invoiceRawText').value;
+            if (!rawText.trim()) {
+                showToast('Please paste invoice content to reconcile', 'warning');
+                return;
+            }
+
+            const todayKey = getTodayDateKey();
+            let matchedCount = 0;
+
+            orderLog.forEach(order => {
+                if (order.timestamp.slice(0, 10) === todayKey && rawText.includes(order.pde)) {
+                    order.status = 'Received';
+                    matchedCount++;
+                }
+            });
+
+            saveOrders();
+            renderActiveTable();
+            renderHistoryTable();
+            closeModal();
+
+            showToast(`Reconciled invoice: ${matchedCount} items marked as Received!`, 'success');
+        }
+
+        function resetActiveDayWithoutInvoice() {
+            if (confirm("Are you sure you want to mark all today's pending orders as processed and reset the queue?")) {
+                const todayKey = getTodayDateKey();
+                orderLog.forEach(order => {
+                    if (order.timestamp.slice(0, 10) === todayKey && order.status === 'Pending Symbion Sync') {
+                        order.status = 'Order Placed';
+                    }
+                });
+                saveOrders();
+                renderActiveTable();
+                renderHistoryTable();
+                closeModal();
+                showToast('Active order queue reset for the day', 'info');
+            }
+        }
+
+        function copySymbionPDEs() {
+            const todayKey = getTodayDateKey();
+            const pendingOrders = orderLog.filter(o => o.timestamp.slice(0, 10) === todayKey && o.status === 'Pending Symbion Sync');
+            
+            if (pendingOrders.length === 0) {
+                showToast('No pending orders found for today to copy', 'warning');
+                return;
+            }
+
+            const textToCopy = pendingOrders.map(o => `${o.pde}\t${o.quantity}`).join('\n');
+
+            const textarea = document.createElement('textarea');
+            textarea.value = textToCopy;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+
+            showToast(`Copied ${pendingOrders.length} PDE items for Symbion!`, 'success');
+        }
+
+        function exportActiveCSV() {
+            const todayKey = getTodayDateKey();
+            const todayOrders = orderLog.filter(o => o.timestamp.slice(0, 10) === todayKey);
+            exportToCsvFile(todayOrders, `Symbion_Daily_Orders_${todayKey}.csv`);
+        }
+
+        function exportHistoryCSV() {
+            exportToCsvFile(orderLog, `PharmaLog_Full_Audit_History_${getTodayDateKey()}.csv`);
+        }
+
+        function exportToCsvFile(dataArray, filename) {
+            if (dataArray.length === 0) {
+                showToast('No orders available to export', 'warning');
+                return;
+            }
+
+            const headers = ["ID", "Timestamp", "Pharmacist Initials", "Pharmacist Name", "PDE", "Barcode", "Product Description", "Quantity", "Status"];
+            const rows = dataArray.map(o => [
+                `"${o.id}"`,
+                `"${formatFullDateTime(o.timestamp)}"`,
+                `"${o.pharmacistInitials}"`,
+                `"${o.pharmacistName}"`,
+                `"${o.pde}"`,
+                `"${o.barcode}"`,
+                `"${o.name.replace(/"/g, '""')}"`,
+                o.quantity,
+                `"${o.status}"`
+            ]);
+
+            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            showToast('CSV export complete', 'success');
+        }
+
+        function openCustomItemModal(prefill = '') {
+            const modalContent = document.getElementById('modalContent');
+            modalContent.innerHTML = `
+                <div class="flex items-center justify-between pb-4 border-b border-slate-200">
+                    <h3 class="font-bold text-slate-900 text-base flex items-center gap-2">
+                        <i data-lucide="plus-circle" class="w-5 h-5 text-brand-600"></i> Add Custom Item
+                    </h3>
+                    <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+
+                <form onsubmit="handleCustomItemSubmit(event)" class="space-y-3.5 mt-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Product Description *</label>
+                        <input type="text" id="customName" value="${escapeHtml(prefill)}" placeholder="e.g. Amoxicillin 500mg Caps" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-brand-500 outline-none" required>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Symbion PDE *</label>
+                            <input type="text" id="customPde" placeholder="e.g. 987654" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-brand-500 outline-none" required>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Barcode</label>
+                            <input type="text" id="customBarcode" placeholder="e.g. 93123456789" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-brand-500 outline-none">
+                        </div>
+                    </div>
+
+                    <div class="pt-3 border-t border-slate-100 flex justify-end gap-2">
+                        <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>
+                        <button type="submit" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold shadow-sm">Save & Order</button>
+                    </div>
+                </form>
+            `;
+            openModal();
+            lucide.createIcons();
+        }
+
+        function handleCustomItemSubmit(e) {
+            e.preventDefault();
+            const newItem = {
+                pde: document.getElementById('customPde').value.trim(),
+                name: document.getElementById('customName').value.trim(),
+                barcode: document.getElementById('customBarcode').value.trim() || 'N/A',
+                brand: 'Custom',
+                pack: 'Unit',
+                form: 'Custom'
+            };
+
+            if (!activeCatalog.some(i => i.pde === newItem.pde)) {
+                activeCatalog.unshift(newItem);
+                saveCatalog();
+            }
+
+            closeModal();
+            logOrder(newItem.pde);
+        }
+
+        function renderCatalogTable() {
+            const tbody = document.getElementById('catalogTableBody');
+            document.getElementById('catalogTotalCount').textContent = activeCatalog.length;
+
+            tbody.innerHTML = activeCatalog.slice(0, 100).map(item => `
+                <tr class="hover:bg-slate-50">
+                    <td class="px-4 py-2 font-mono font-bold text-brand-700">${item.pde}</td>
+                    <td class="px-4 py-2 font-medium text-slate-800">${escapeHtml(item.name)}</td>
+                    <td class="px-4 py-2 text-slate-500">${escapeHtml(item.brand || '')} / ${escapeHtml(item.pack || '')}</td>
+                    <td class="px-4 py-2 font-mono text-slate-500">${item.barcode || 'N/A'}</td>
+                    <td class="px-4 py-2 text-right">
+                        <button onclick="deleteCatalogItem('${item.pde}')" class="text-slate-400 hover:text-red-600"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                    </td>
+                </tr>
+            `).join('');
+
+            lucide.createIcons();
+        }
+
+        function deleteCatalogItem(pde) {
+            activeCatalog = activeCatalog.filter(i => i.pde !== pde);
+            saveCatalog();
+            renderCatalogTable();
+            showToast('Removed item from catalog', 'info');
+        }
+
+        function resetDefaultCatalog() {
+            activeCatalog = [...DEFAULT_CATALOG];
+            saveCatalog();
+            renderCatalogTable();
+            showToast('Reset to default sample catalog', 'info');
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+                    if (json.length === 0) return;
+
+                    activeCatalog = json.map((row, idx) => {
+                        const keys = Object.keys(row);
+                        const findVal = (terms) => {
+                            const foundKey = keys.find(k => terms.some(t => k.toLowerCase().includes(t.toLowerCase())));
+                            return foundKey ? String(row[foundKey]).trim() : '';
+                        };
+
+                        return {
+                            pde: findVal(['pde', 'code', 'id']) || `ITEM-${idx+1}`,
+                            name: findVal(['description', 'product', 'name']) || 'Unnamed Product',
+                            barcode: findVal(['barcode', 'ean', 'gtin']) || 'N/A',
+                            brand: findVal(['brand']) || 'Generic',
+                            pack: findVal(['pack']) || 'Unit',
+                            form: findVal(['form']) || ''
+                        };
+                    });
+
+                    saveCatalog();
+                    renderCatalogTable();
+                    showToast(`Loaded ${activeCatalog.length} items from Excel/CSV`, 'success');
+                } catch(err) {
+                    showToast('Error reading spreadsheet file', 'error');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function updateBadgesAndStats() {
+            const todayKey = getTodayDateKey();
+            const todayOrders = orderLog.filter(o => o.timestamp.slice(0, 10) === todayKey && o.status === 'Pending Symbion Sync');
+            
+            document.getElementById('activeCountBadge').textContent = todayOrders.length;
+            document.getElementById('historyCountBadge').textContent = orderLog.length;
+
+            document.getElementById('statTotalOrders').textContent = orderLog.length;
+            document.getElementById('statTotalItems').textContent = orderLog.reduce((acc, o) => acc + (o.quantity || 1), 0);
+            
+            const uniqueStaff = new Set(orderLog.map(o => o.pharmacistInitials));
+            document.getElementById('statUniquePharmacists').textContent = uniqueStaff.size;
+        }
+
+        function populatePharmacistFilterOptions() {
+            const select = document.getElementById('historyFilterPharmacist');
+            select.innerHTML = `<option value="ALL">All Staff</option>` + 
+                PHARMACISTS.map(p => `<option value="${p.initials}">${p.name} [${p.initials}]</option>`).join('');
+        }
+
+        function getPharmacistColor(initials) {
+            const p = PHARMACISTS.find(x => x.initials === initials);
+            return p ? p.color : 'bg-slate-600';
+        }
+
+        function openModal() { document.getElementById('modalOverlay').classList.remove('hidden'); }
+        function closeModal() { document.getElementById('modalOverlay').classList.add('hidden'); }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+
+            let bgClass = "bg-slate-900 text-white";
+            let icon = "info";
+            if (type === 'success') { bgClass = "bg-brand-600 text-white"; icon = "check-circle"; }
+            if (type === 'warning') { bgClass = "bg-amber-600 text-white"; icon = "alert-triangle"; }
+            if (type === 'error') { bgClass = "bg-red-600 text-white"; icon = "alert-octagon"; }
+
+            toast.className = `${bgClass} p-3.5 rounded-xl shadow-xl font-medium text-xs flex items-center gap-2.5 transition-all transform translate-y-2 opacity-0 pointer-events-auto`;
+            toast.innerHTML = `<i data-lucide="${icon}" class="w-4 h-4 flex-shrink-0"></i><span class="flex-1">${escapeHtml(message)}</span>`;
+
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            setTimeout(() => toast.classList.remove('translate-y-2', 'opacity-0'), 10);
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function formatFullDateTime(isoStr) {
+            const d = new Date(isoStr);
+            return d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' +
+                   d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function formatTimeOnly(isoStr) {
+            const d = new Date(isoStr);
+            return d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
